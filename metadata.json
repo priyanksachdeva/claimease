@@ -1,0 +1,5 @@
+{
+  "name": "ClaimEase",
+  "description": "A calming, mobile-first app to manage hospital bills and track insurance claims seamlessly.",
+  "requestFramePermissions": ["camera"]
+}

@@ -2,16 +2,55 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Camera, UploadCloud, CheckCircle2, X, FileText, RefreshCw, Aperture } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useNotificationStore } from "../lib/store";
+import { API_ENDPOINTS } from "../config/api";
+
+interface Hospital {
+  id: string;
+  name: string;
+}
 
 export default function Upload() {
   const [step, setStep] = useState<"select" | "camera" | "details" | "success">("select");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [fileType, setFileType] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const { addNotification } = useNotificationStore();
   const navigate = useNavigate();
+
+  const [formData, setFormData] = useState({
+    title: "Apollo Hospitals",
+    amount: "2450.00",
+    billDate: new Date().toISOString().split("T")[0],
+    category: "consultation",
+    hospitalOrgId: ""
+  });
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+
+  // Fetch hospitals for dropdown
+  useEffect(() => {
+    const fetchHospitals = async () => {
+      try {
+        const response = await fetch(API_ENDPOINTS.ORGANIZATIONS_HOSPITALS);
+        if (response.ok) {
+          const data = await response.json();
+          const orgs = data.organizations || data;
+          setHospitals(orgs.map((o: any) => ({ id: o._id, name: o.name })));
+          if (orgs.length > 0) {
+            setFormData(prev => ({ ...prev, hospitalOrgId: orgs[0]._id, title: orgs[0].name }));
+          }
+        }
+      } catch (error) {
+        console.error("Failed to fetch hospitals", error);
+      }
+    };
+    fetchHospitals();
+  }, []);
 
   // Clean up camera stream when component unmounts or step changes
   useEffect(() => {
@@ -59,6 +98,15 @@ export default function Upload() {
         const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
         setPreviewUrl(dataUrl);
         setFileType('image/jpeg');
+        
+        // Create a file object from data URL
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const file = new File([blob], "receipt.jpg", { type: "image/jpeg" });
+            setSelectedFile(file);
+          }
+        }, 'image/jpeg');
+
         stopCamera();
         setStep("details");
       }
@@ -68,6 +116,7 @@ export default function Upload() {
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
       setFileType(file.type);
@@ -75,12 +124,47 @@ export default function Upload() {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setStep("success");
-    setTimeout(() => {
-      navigate("/bills");
-    }, 2000);
+    try {
+      setIsSubmitting(true);
+      const token = localStorage.getItem("token");
+      
+      const submitData = new FormData();
+      submitData.append("title", formData.title);
+      submitData.append("amount", formData.amount);
+      submitData.append("billDate", formData.billDate);
+      submitData.append("category", formData.category.toLowerCase());
+      submitData.append("hospitalOrgId", formData.hospitalOrgId);
+      
+      if (selectedFile) {
+        submitData.append("file", selectedFile);
+      }
+
+      const response = await fetch(API_ENDPOINTS.BILLS_UPLOAD, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: submitData
+      });
+
+      if (response.ok) {
+        setStep("success");
+        addNotification("Bill uploaded successfully", "success");
+        setTimeout(() => {
+          navigate("/bills");
+        }, 2000);
+      } else {
+        const errorData = await response.json();
+        addNotification(errorData.error || "Failed to upload bill", "error");
+      }
+    } catch (error) {
+      console.error("Upload error:", error);
+      addNotification("Network error. Please try again.", "error");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -233,34 +317,68 @@ export default function Upload() {
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Hospital / Clinic Name</label>
-                <input type="text" defaultValue="Apollo Hospitals" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" required />
+                <label className="block text-sm font-medium text-slate-700 mb-1">Hospital / Clinic</label>
+                <select 
+                  value={formData.hospitalOrgId}
+                  onChange={(e) => {
+                    const hospital = hospitals.find(h => h.id === e.target.value);
+                    setFormData({ ...formData, hospitalOrgId: e.target.value, title: hospital?.name || "" });
+                  }}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" 
+                  required
+                >
+                  {hospitals.map(h => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                  {hospitals.length === 0 && <option value="">Loading hospitals...</option>}
+                </select>
               </div>
               
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Amount (₹)</label>
-                  <input type="number" defaultValue="2450.00" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" required />
+                  <input 
+                    type="number" 
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" 
+                    required 
+                  />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">Date</label>
-                  <input type="date" defaultValue="2026-03-25" className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" required />
+                  <input 
+                    type="date" 
+                    value={formData.billDate}
+                    onChange={(e) => setFormData({ ...formData, billDate: e.target.value })}
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500" 
+                    required 
+                  />
                 </div>
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Category</label>
-                <select className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500">
-                  <option>Consultation</option>
-                  <option>Lab Test</option>
-                  <option>Medicine</option>
-                  <option>Surgery</option>
-                  <option>Other</option>
+                <select 
+                  value={formData.category}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500"
+                >
+                  <option value="consultation">Consultation</option>
+                  <option value="tests">Lab Test / Tests</option>
+                  <option value="medication">Medicine / Medication</option>
+                  <option value="surgery">Surgery</option>
+                  <option value="imaging">Imaging (X-Ray, etc.)</option>
+                  <option value="other">Other</option>
                 </select>
               </div>
 
-              <button type="submit" className="w-full bg-teal-700 text-white rounded-xl py-3.5 font-medium shadow-lg shadow-teal-900/20 mt-6 hover:bg-teal-800 transition-colors">
-                Submit for Claim
+              <button 
+                type="submit" 
+                disabled={isSubmitting}
+                className="w-full bg-teal-700 text-white rounded-xl py-3.5 font-medium shadow-lg shadow-teal-900/20 mt-6 hover:bg-teal-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSubmitting ? <><RefreshCw size={18} className="animate-spin" /> Uploading...</> : "Submit for Claim"}
               </button>
             </form>
           </motion.div>

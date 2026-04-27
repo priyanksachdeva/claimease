@@ -1,5 +1,6 @@
-import pool from "../db/connection.js";
+import { getDatabase } from "../db/connection.js";
 import { Organization } from "../types/index.js";
+import { v4 as uuidv4 } from "uuid";
 
 export class OrganizationService {
   static async createOrganization(
@@ -17,28 +18,51 @@ export class OrganizationService {
     logoUrl?: string,
   ): Promise<Organization | null> {
     try {
-      const result = await pool.query(
-        `INSERT INTO organizations (name, type, registration_number, address, city, state, country, postal_code, phone, email, website, logo_url, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, true)
-         RETURNING id, name, type, registration_number as "registrationNumber", address, city, state, country, postal_code as "postalCode",
-                   phone, email, website, logo_url as "logoUrl", is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"`,
-        [
-          name,
-          type,
-          registrationNumber,
-          address,
-          city,
-          state,
-          country,
-          postalCode,
-          phone,
-          email,
-          website || null,
-          logoUrl || null,
-        ],
-      );
+      const db = await getDatabase();
 
-      return result.rows[0] || null;
+      const newOrg = {
+        _id: uuidv4(),
+        name,
+        type,
+        registrationNumber,
+        address,
+        city,
+        state,
+        country,
+        postalCode,
+        phone,
+        email,
+        website: website || null,
+        logoUrl: logoUrl || null,
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await (db.collection("organizations") as any).insertOne(newOrg);
+
+      if (result.insertedId) {
+        return {
+          id: newOrg._id,
+          name: newOrg.name,
+          type: newOrg.type,
+          registrationNumber: newOrg.registrationNumber,
+          address: newOrg.address,
+          city: newOrg.city,
+          state: newOrg.state,
+          country: newOrg.country,
+          postalCode: newOrg.postalCode,
+          phone: newOrg.phone,
+          email: newOrg.email,
+          website: newOrg.website,
+          logoUrl: newOrg.logoUrl,
+          isActive: newOrg.isActive,
+          createdAt: newOrg.createdAt,
+          updatedAt: newOrg.updatedAt,
+        } as any;
+      }
+
+      return null;
     } catch (error) {
       console.error("Error creating organization:", error);
       return null;
@@ -47,14 +71,31 @@ export class OrganizationService {
 
   static async getOrganizationById(id: string): Promise<Organization | null> {
     try {
-      const result = await pool.query(
-        `SELECT id, name, type, registration_number as "registrationNumber", address, city, state, country, postal_code as "postalCode",
-                phone, email, website, logo_url as "logoUrl", is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
-         FROM organizations WHERE id = $1`,
-        [id],
-      );
+      const db = await getDatabase();
+      const org = await (db.collection("organizations") as any).findOne({ _id: id });
 
-      return result.rows[0] || null;
+      if (org) {
+        return {
+          id: org._id,
+          name: org.name,
+          type: org.type,
+          registrationNumber: org.registrationNumber,
+          address: org.address,
+          city: org.city,
+          state: org.state,
+          country: org.country,
+          postalCode: org.postalCode,
+          phone: org.phone,
+          email: org.email,
+          website: org.website,
+          logoUrl: org.logoUrl,
+          isActive: org.isActive,
+          createdAt: org.createdAt,
+          updatedAt: org.updatedAt,
+        } as any;
+      }
+
+      return null;
     } catch (error) {
       console.error("Error getting organization:", error);
       return null;
@@ -65,23 +106,76 @@ export class OrganizationService {
     type?: "hospital" | "insurance",
   ): Promise<Organization[]> {
     try {
-      let query = `SELECT id, name, type, registration_number as "registrationNumber", address, city, state, country, postal_code as "postalCode",
-                          phone, email, website, logo_url as "logoUrl", is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
-                   FROM organizations WHERE is_active = true`;
-      const params: any[] = [];
+      const db = await getDatabase();
+      const query: any = { isActive: true };
 
       if (type) {
-        query += ` AND type = $1`;
-        params.push(type);
+        query.type = type;
       }
 
-      query += ` ORDER BY created_at DESC`;
+      const orgs = await (db.collection("organizations") as any)
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
 
-      const result = await pool.query(query, params);
-      return result.rows;
+      return orgs.map((org: any) => ({
+        id: org._id,
+        name: org.name,
+        type: org.type,
+        registrationNumber: org.registrationNumber,
+        address: org.address,
+        city: org.city,
+        state: org.state,
+        country: org.country,
+        postalCode: org.postalCode,
+        phone: org.phone,
+        email: org.email,
+        website: org.website,
+        logoUrl: org.logoUrl,
+        isActive: org.isActive,
+        createdAt: org.createdAt,
+        updatedAt: org.updatedAt,
+      }));
     } catch (error) {
       console.error("Error getting organizations:", error);
       return [];
+    }
+  }
+
+  static async getOrganizationByRegistration(
+    registrationNumber: string,
+  ): Promise<Organization | null> {
+    try {
+      const db = await getDatabase();
+      const org = await (db.collection("organizations") as any).findOne({
+        registrationNumber,
+      });
+
+      if (org) {
+        return {
+          id: org._id,
+          name: org.name,
+          type: org.type,
+          registrationNumber: org.registrationNumber,
+          address: org.address,
+          city: org.city,
+          state: org.state,
+          country: org.country,
+          postalCode: org.postalCode,
+          phone: org.phone,
+          email: org.email,
+          website: org.website,
+          logoUrl: org.logoUrl,
+          isActive: org.isActive,
+          createdAt: org.createdAt,
+          updatedAt: org.updatedAt,
+        } as any;
+      }
+
+      return null;
+    } catch (error) {
+      console.error("Error getting organization:", error);
+      return null;
     }
   }
 }

@@ -1,194 +1,329 @@
-import pool from "./connection.js";
+import { connectDatabase } from "./connection.js";
+import { v4 as uuidv4 } from "uuid";
+import bcryptjs from "bcryptjs";
+import crypto from "crypto";
+import { logger, sanitizeError } from "../utils/logger.js";
+
+const USERS_SCHEMA = {
+  bsonType: "object",
+  additionalProperties: true,
+  required: ["email", "passwordHash", "firstName", "lastName", "role"],
+  properties: {
+    _id: { bsonType: "string" },
+    email: { bsonType: "string" },
+    passwordHash: { bsonType: "string" },
+    firstName: { bsonType: "string" },
+    lastName: { bsonType: "string" },
+    phone: { bsonType: ["string", "null"] },
+    role: { enum: ["patient", "hospital", "insurance"] },
+    orgId: { bsonType: ["string", "null"] },
+    policyNumber: { bsonType: ["string", "null"] },
+    isActive: { bsonType: "bool" },
+    createdAt: { bsonType: "date" },
+    updatedAt: { bsonType: "date" },
+  },
+};
+
+const ORGANIZATIONS_SCHEMA = {
+  bsonType: "object",
+  additionalProperties: true,
+  required: ["name", "type", "registrationNumber"],
+  properties: {
+    _id: { bsonType: "string" },
+    name: { bsonType: "string" },
+    type: { bsonType: "string" },
+    registrationNumber: { bsonType: "string" },
+    address: { bsonType: ["string", "null"] },
+    city: { bsonType: ["string", "null"] },
+    state: { bsonType: ["string", "null"] },
+    country: { bsonType: ["string", "null"] },
+    postalCode: { bsonType: ["string", "null"] },
+    phone: { bsonType: ["string", "null"] },
+    email: { bsonType: ["string", "null"] },
+    website: { bsonType: ["string", "null"] },
+    logoUrl: { bsonType: ["string", "null"] },
+    isActive: { bsonType: "bool" },
+    createdAt: { bsonType: "date" },
+    updatedAt: { bsonType: "date" },
+  },
+};
 
 export async function initializeDatabase() {
   try {
-    // Test connection
-    const client = await pool.connect();
-    console.log("✅ Database connected");
-    client.release();
+    const db = await connectDatabase();
+    logger.info("✅ Database connected");
 
     // Run migrations
-    await runMigrations();
+    await runMigrations(db);
   } catch (error) {
-    console.error("❌ Database connection failed:", error);
+    logger.error("❌ Database initialization failed:", sanitizeError(error));
     process.exit(1);
   }
 }
 
-async function runMigrations() {
+async function runMigrations(db: any) {
   try {
-    const client = await pool.connect();
+    // Create collections with validation schema
+    const collections = await db.listCollections().toArray();
+    const collectionNames = collections.map((c: any) => c.name);
 
-    // Create ENUM types
-    await client.query(`
-      DO $$ BEGIN
-        CREATE TYPE user_role AS ENUM ('patient', 'hospital', 'insurance');
-      EXCEPTION
-        WHEN duplicate_object THEN NULL;
-      END $$;
-    `);
+    // Users collection
+    if (!collectionNames.includes("users")) {
+      await db.createCollection("users", {
+        validator: { $jsonSchema: USERS_SCHEMA },
+      });
+      logger.info("✅ Created users collection");
+    } else {
+      try {
+        await db.command({
+          collMod: "users",
+          validator: { $jsonSchema: USERS_SCHEMA },
+        });
+        logger.info("✅ Updated users collection validator");
+      } catch (e) {
+        logger.error("❌ Could not update users collection validator:", sanitizeError(e));
+      }
+    }
 
-    await client.query(`
-      DO $$ BEGIN
-        CREATE TYPE claim_status AS ENUM ('submitted', 'verification', 'processing', 'approved', 'rejected');
-      EXCEPTION
-        WHEN duplicate_object THEN NULL;
-      END $$;
-    `);
+    // Organizations collection
+    if (!collectionNames.includes("organizations")) {
+      await db.createCollection("organizations", {
+        validator: { $jsonSchema: ORGANIZATIONS_SCHEMA },
+      });
+      logger.info("✅ Created organizations collection");
+    } else {
+      try {
+        await db.command({
+          collMod: "organizations",
+          validator: { $jsonSchema: ORGANIZATIONS_SCHEMA },
+        });
+        logger.info("✅ Updated organizations collection validator");
+      } catch (e) {
+        logger.error("❌ Could not update organizations collection validator:", sanitizeError(e));
+      }
+    }
 
-    await client.query(`
-      DO $$ BEGIN
-        CREATE TYPE bill_category AS ENUM ('lab', 'medicine', 'consultation', 'surgery', 'diagnostic', 'other');
-      EXCEPTION
-        WHEN duplicate_object THEN NULL;
-      END $$;
-    `);
 
-    // Users table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        email VARCHAR(255) UNIQUE NOT NULL,
-        password_hash VARCHAR(255) NOT NULL,
-        first_name VARCHAR(255) NOT NULL,
-        last_name VARCHAR(255) NOT NULL,
-        phone VARCHAR(20),
-        role user_role NOT NULL,
-        org_id UUID,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    // Bills collection
+    if (!collectionNames.includes("bills")) {
+      await db.createCollection("bills", {
+        validator: {
+          $jsonSchema: {
+            bsonType: "object",
+            required: [
+              "userId",
+              "hospitalOrgId",
+              "title",
+              "category",
+              "amount",
+              "billDate",
+              "status",
+            ],
+            properties: {
+              _id: { bsonType: "string" },
+              userId: { bsonType: "string" },
+              hospitalOrgId: { bsonType: ["string", "null"] },
+              title: { bsonType: "string" },
+              category: {
+                enum: ["consultation", "surgery", "medication", "tests", "imaging", "other"],
+              },
+              amount: { bsonType: "number" },
+              description: { bsonType: ["string", "null"] },
+              billDate: { bsonType: "date" },
+              documentUrls: { bsonType: "array" },
+              status: { enum: ["pending", "submitted", "approved", "rejected", "paid", "cancelled"] },
+              createdAt: { bsonType: "date" },
+              updatedAt: { bsonType: "date" },
+            },
+          },
+        },
+      });
+      logger.info("✅ Created bills collection");
+    }
 
-    // Organizations table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS organizations (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        name VARCHAR(255) NOT NULL,
-        type VARCHAR(50) NOT NULL,
-        registration_number VARCHAR(255) UNIQUE NOT NULL,
-        address TEXT,
-        city VARCHAR(100),
-        state VARCHAR(100),
-        country VARCHAR(100),
-        postal_code VARCHAR(20),
-        phone VARCHAR(20),
-        email VARCHAR(255),
-        website VARCHAR(255),
-        logo_url VARCHAR(255),
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    // Claims collection
+    if (!collectionNames.includes("claims")) {
+      await db.createCollection("claims", {
+        validator: {
+          $jsonSchema: {
+            bsonType: "object",
+            required: [
+              "billId",
+              "userId",
+              "insuranceOrgId",
+              "hospitalOrgId",
+              "claimNumber",
+              "totalAmount",
+              "status",
+            ],
+            properties: {
+              _id: { bsonType: "string" },
+              billId: { bsonType: "string" },
+              userId: { bsonType: "string" },
+              insuranceOrgId: { bsonType: "string" },
+              hospitalOrgId: { bsonType: ["string", "null"] },
+              claimNumber: { bsonType: "string" },
+              totalAmount: { bsonType: "number" },
+              status: {
+                enum: [
+                  "submitted",
+                  "verification",
+                  "processing",
+                  "approved",
+                  "rejected",
+                ],
+              },
+              submittedAt: { bsonType: "date" },
+              verifiedAt: { bsonType: ["date", "null"] },
+              approvedAt: { bsonType: ["date", "null"] },
+              rejectedAt: { bsonType: ["date", "null"] },
+              rejectionReason: { bsonType: ["string", "null"] },
+              createdAt: { bsonType: "date" },
+              updatedAt: { bsonType: "date" },
+            },
+          },
+        },
+      });
+      logger.info("✅ Created claims collection");
+    }
 
-    // Insurance Policies table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS insurance_policies (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        insurance_org_id UUID NOT NULL REFERENCES organizations(id),
-        policy_number VARCHAR(255) UNIQUE NOT NULL,
-        plan_name VARCHAR(255) NOT NULL,
-        total_coverage DECIMAL(12, 2) NOT NULL,
-        used_coverage DECIMAL(12, 2) DEFAULT 0,
-        start_date DATE NOT NULL,
-        end_date DATE NOT NULL,
-        is_active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Bills table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS bills (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        hospital_org_id UUID NOT NULL REFERENCES organizations(id),
-        title VARCHAR(255) NOT NULL,
-        category bill_category NOT NULL,
-        amount DECIMAL(10, 2) NOT NULL,
-        description TEXT,
-        bill_date DATE NOT NULL,
-        document_urls TEXT[],
-        status VARCHAR(50) DEFAULT 'submitted',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Claims table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS claims (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        bill_id UUID NOT NULL REFERENCES bills(id) ON DELETE CASCADE,
-        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-        insurance_org_id UUID NOT NULL REFERENCES organizations(id),
-        hospital_org_id UUID NOT NULL REFERENCES organizations(id),
-        claim_number VARCHAR(255) UNIQUE NOT NULL,
-        total_amount DECIMAL(12, 2) NOT NULL,
-        status claim_status DEFAULT 'submitted',
-        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        verified_at TIMESTAMP,
-        approved_at TIMESTAMP,
-        rejected_at TIMESTAMP,
-        rejection_reason TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Claim Events (timeline) table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS claim_events (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        claim_id UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
-        status claim_status NOT NULL,
-        notes TEXT,
-        created_by UUID NOT NULL REFERENCES users(id),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
-
-    // Messages table
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS messages (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-        sender_id UUID NOT NULL REFERENCES users(id),
-        recipient_id UUID,
-        organization_id UUID,
-        claim_id UUID REFERENCES claims(id) ON DELETE SET NULL,
-        subject VARCHAR(255),
-        body TEXT NOT NULL,
-        attachment_urls TEXT[],
-        is_read BOOLEAN DEFAULT false,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      );
-    `);
+    // Claim Events collection
+    if (!collectionNames.includes("claimEvents")) {
+      await db.createCollection("claimEvents", {
+        validator: {
+          $jsonSchema: {
+            bsonType: "object",
+            required: ["claimId", "status", "createdBy"],
+            properties: {
+              _id: { bsonType: "string" },
+              claimId: { bsonType: "string" },
+              status: { bsonType: "string" },
+              notes: { bsonType: ["string", "null"] },
+              createdBy: { bsonType: "string" },
+              createdAt: { bsonType: "date" },
+            },
+          },
+        },
+      });
+      logger.info("✅ Created claimEvents collection");
+    }
 
     // Create indexes
-    await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-      CREATE INDEX IF NOT EXISTS idx_users_org_id ON users(org_id);
-      CREATE INDEX IF NOT EXISTS idx_bills_user_id ON bills(user_id);
-      CREATE INDEX IF NOT EXISTS idx_bills_hospital_org_id ON bills(hospital_org_id);
-      CREATE INDEX IF NOT EXISTS idx_claims_user_id ON claims(user_id);
-      CREATE INDEX IF NOT EXISTS idx_claims_insurance_org_id ON claims(insurance_org_id);
-      CREATE INDEX IF NOT EXISTS idx_claims_hospital_org_id ON claims(hospital_org_id);
-      CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
-      CREATE INDEX IF NOT EXISTS idx_policies_user_id ON insurance_policies(user_id);
-      CREATE INDEX IF NOT EXISTS idx_messages_sender_id ON messages(sender_id);
-      CREATE INDEX IF NOT EXISTS idx_messages_recipient_id ON messages(recipient_id);
-    `);
+    const usersCollection = db.collection("users");
+    await usersCollection.createIndex({ email: 1 }, { unique: true });
+    await usersCollection.createIndex({ orgId: 1 });
+    await usersCollection.createIndex({ role: 1 });
 
-    console.log("✅ All migrations completed");
-    client.release();
+    const orgsCollection = db.collection("organizations");
+    await orgsCollection.createIndex({ registrationNumber: 1 }, { unique: true });
+
+    const billsCollection = db.collection("bills");
+    await billsCollection.createIndex({ userId: 1 });
+    await billsCollection.createIndex({ hospitalOrgId: 1 });
+    await billsCollection.createIndex({ status: 1 });
+
+    const claimsCollection = db.collection("claims");
+    await claimsCollection.createIndex({ claimNumber: 1 }, { unique: true });
+    await claimsCollection.createIndex({ insuranceOrgId: 1 });
+    await claimsCollection.createIndex({ hospitalOrgId: 1 });
+
+    logger.info("✅ All indexes created successfully");
+
+    // Seed demo data
+    if (process.env.SEED_DEMO_DATA === "true") {
+      await seedDemoData(db);
+    }
+
+    logger.info("✅ All migrations completed successfully");
   } catch (error) {
-    console.error("❌ Migration error:", error);
+    logger.error("❌ Migration error:", sanitizeError(error));
     throw error;
   }
 }
 
-export default runMigrations;
+function generateSecurePassword() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+async function seedDemoData(db: any) {
+  try {
+    logger.info("🌱 Seeding demo data...");
+
+    const orgsCollection = db.collection("organizations");
+    const usersCollection = db.collection("users");
+
+    // Idempotent Organization Seeding
+    const hospitalOrgData = {
+      name: "City Medical Center",
+      type: "hospital",
+      registrationNumber: "HOSP-001",
+      address: "123 Medical Avenue",
+      city: "New Delhi",
+      isActive: true,
+      updatedAt: new Date(),
+    };
+
+    const insuranceOrgData = {
+      name: "HealthCare Plus Insurance",
+      type: "insurance",
+      registrationNumber: "INS-001",
+      address: "456 Insurance Plaza",
+      city: "Mumbai",
+      isActive: true,
+      updatedAt: new Date(),
+    };
+
+    await orgsCollection.updateOne(
+      { registrationNumber: "HOSP-001" },
+      { $setOnInsert: { _id: uuidv4(), createdAt: new Date() }, $set: hospitalOrgData },
+      { upsert: true }
+    );
+
+    await orgsCollection.updateOne(
+      { registrationNumber: "INS-001" },
+      { $setOnInsert: { _id: uuidv4(), createdAt: new Date() }, $set: insuranceOrgData },
+      { upsert: true }
+    );
+
+    const hospitalOrg = await orgsCollection.findOne({ registrationNumber: "HOSP-001" });
+    const insuranceOrg = await orgsCollection.findOne({ registrationNumber: "INS-001" });
+
+    // Idempotent User Seeding
+    const seedUser = async (email: string, role: string, firstName: string, lastName: string, orgId: string | null, envPasswordKey: string) => {
+      let password = process.env[envPasswordKey];
+      if (!password) {
+        password = generateSecurePassword();
+        logger.warn(`⚠️  No password found for ${email} in environment. Generated secure password: ${password}`);
+      }
+
+      const passwordHash = await bcryptjs.hash(password, 10);
+      const userData = {
+        email,
+        passwordHash,
+        firstName,
+        lastName,
+        role,
+        orgId,
+        isActive: true,
+        updatedAt: new Date(),
+      };
+
+      await usersCollection.updateOne(
+        { email },
+        { $setOnInsert: { _id: uuidv4(), createdAt: new Date() }, $set: userData },
+        { upsert: true }
+      );
+    };
+
+    await seedUser("patient@example.com", "patient", "Aarav", "Sharma", null, "DEMO_PATIENT_PASSWORD");
+    await seedUser("admin@cityhospital.com", "hospital", "Dr.", "Kumar", hospitalOrg._id, "DEMO_HOSPITAL_PASSWORD");
+    await seedUser("admin@healthcareplus.com", "insurance", "Priya", "Singh", insuranceOrg._id, "DEMO_INSURANCE_PASSWORD");
+
+    logger.info("✅ Demo data seeded successfully");
+  } catch (error) {
+    logger.error("❌ Seed data error:", sanitizeError(error));
+  }
+}
+
+export default initializeDatabase;
+

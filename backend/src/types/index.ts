@@ -106,6 +106,26 @@ export interface Message {
   createdAt: Date;
 }
 
+export interface Message {
+  id: string;
+  conversationId: string;
+  fromUserId: string;
+  toUserId: string;
+  text: string;
+  isRead: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Conversation {
+  id: string;
+  participantIds: string[];
+  lastMessage?: string;
+  lastMessageAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface JWTPayload {
   userId: string;
   email: string;

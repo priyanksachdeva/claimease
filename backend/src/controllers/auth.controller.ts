@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { AuthService } from "../services/auth.service.js";
 import { generateToken } from "../utils/jwt.js";
+import { getDatabase } from "../db/connection.js";
 
 export async function register(req: Request, res: Response): Promise<void> {
   try {
@@ -126,6 +127,53 @@ export async function getCurrentUser(
     res.json(user);
   } catch (error) {
     console.error("Get current user error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+export async function getAllUsers(
+  req: Request,
+  res: Response,
+): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    // Only allow hospital and insurance roles to list users
+    if (req.user.role !== "hospital" && req.user.role !== "insurance") {
+      res.status(403).json({ error: "Forbidden - Only hospital and insurance admins can list users" });
+      return;
+    }
+
+    const db = await getDatabase();
+    const usersCollection = db.collection("users") as any;
+
+    // Hospitals/Insurance should see:
+    // 1. All patients (so they can create bills/claims for them)
+    // 2. Users belonging to their own organization
+    const query = {
+      $or: [
+        { role: "patient" },
+        { orgId: req.user.orgId }
+      ]
+    };
+
+    const users = await usersCollection.find(query).toArray();
+    
+    res.json(users.map((user: any) => ({
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      role: user.role,
+      orgId: user.orgId,
+      policyNumber: user.policyNumber || "",
+      isActive: user.isActive,
+    })));
+  } catch (error) {
+    console.error("Get all users error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 }

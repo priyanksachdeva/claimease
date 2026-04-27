@@ -74,6 +74,17 @@ class APIClient {
     return response.data;
   }
 
+  async registerInsurance(data: any): Promise<any> {
+    const response = await this.client.post(
+      "/organizations/register/insurance",
+      data,
+    );
+    if (response.data.token) {
+      this.setToken(response.data.token);
+    }
+    return response.data;
+  }
+
   async login(data: LoginRequest): Promise<LoginResponse> {
     const response = await this.client.post<LoginResponse>("/auth/login", data);
     if (response.data.token) {

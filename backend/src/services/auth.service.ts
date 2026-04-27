@@ -1,6 +1,8 @@
-import pool from "../db/connection.js";
+import { getDatabase } from "../db/connection.js";
 import { User } from "../types/index.js";
 import { hashPassword, comparePasswords } from "../utils/password.js";
+import { v4 as uuidv4 } from "uuid";
+import { logger, sanitizeError } from "../utils/logger.js";
 
 export class AuthService {
   static async createUser(
@@ -10,36 +12,84 @@ export class AuthService {
     lastName: string,
     role: "patient" | "hospital" | "insurance",
     orgId?: string,
+    phone?: string,
   ): Promise<User | null> {
     try {
+      const db = await getDatabase();
+      
+      // Check if user already exists
+      const existingUser = await (db.collection("users") as any).findOne({ email });
+      if (existingUser) {
+        throw new Error("Email already in use");
+      }
+
       const hashedPassword = await hashPassword(password);
 
-      const result = await pool.query(
-        `INSERT INTO users (email, password_hash, first_name, last_name, role, org_id, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, true)
-         RETURNING id, email, first_name as "firstName", last_name as "lastName", phone, role, org_id as "orgId", is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"`,
-        [email, hashedPassword, firstName, lastName, role, orgId || null],
-      );
+      const newUser = {
+        _id: uuidv4(),
+        email,
+        passwordHash: hashedPassword,
+        firstName,
+        lastName,
+        phone: phone || "",
+        role,
+        orgId: orgId || null,
+        policyNumber: "", // Initialized as empty
+        isActive: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-      return result.rows[0] || null;
-    } catch (error) {
-      console.error("Error creating user:", error);
+      const result = await (db.collection("users") as any).insertOne(newUser);
+
+      if (result.insertedId) {
+        return {
+          id: newUser._id,
+          email: newUser.email,
+          firstName: newUser.firstName,
+          lastName: newUser.lastName,
+          phone: newUser.phone,
+          role: newUser.role,
+          orgId: newUser.orgId,
+          policyNumber: newUser.policyNumber,
+          isActive: newUser.isActive,
+          createdAt: newUser.createdAt,
+          updatedAt: newUser.updatedAt,
+        } as any;
+      }
+
       return null;
+    } catch (error) {
+      logger.error("Error creating user:", sanitizeError(error));
+      throw error; // Rethrow to allow controller to handle validation error
     }
   }
 
   static async getUserByEmail(email: string): Promise<any | null> {
     try {
-      const result = await pool.query(
-        `SELECT id, email, password_hash as "passwordHash", first_name as "firstName", last_name as "lastName", 
-                phone, role, org_id as "orgId", is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
-         FROM users WHERE email = $1`,
-        [email],
-      );
+      const db = await getDatabase();
+      const user = await (db.collection("users") as any).findOne({ email });
 
-      return result.rows[0] || null;
+      if (user) {
+        return {
+          id: user._id,
+          email: user.email,
+          passwordHash: user.passwordHash,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          role: user.role,
+          orgId: user.orgId,
+          policyNumber: user.policyNumber || "",
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        };
+      }
+
+      return null;
     } catch (error) {
-      console.error("Error getting user by email:", error);
+      logger.error("Error getting user by email:", sanitizeError(error));
       return null;
     }
   }
@@ -53,17 +103,78 @@ export class AuthService {
 
   static async getUserById(id: string): Promise<User | null> {
     try {
-      const result = await pool.query(
-        `SELECT id, email, first_name as "firstName", last_name as "lastName", phone, role, org_id as "orgId", 
-                is_active as "isActive", created_at as "createdAt", updated_at as "updatedAt"
-         FROM users WHERE id = $1`,
-        [id],
-      );
+      const db = await getDatabase();
+      const user = await (db.collection("users") as any).findOne({ _id: id });
 
-      return result.rows[0] || null;
+      if (user) {
+        return {
+          id: user._id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+          role: user.role,
+          orgId: user.orgId,
+          policyNumber: user.policyNumber || "",
+          isActive: user.isActive,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+        } as any;
+      }
+
+      return null;
     } catch (error) {
-      console.error("Error getting user by id:", error);
+      logger.error("Error getting user by id:", sanitizeError(error));
       return null;
     }
   }
+
+  static async getAllUsers(): Promise<User[]> {
+    try {
+      const db = await getDatabase();
+      const users = await (db.collection("users") as any).find({}).toArray();
+
+      return users.map((user: any) => ({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        role: user.role,
+        orgId: user.orgId,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        policyNumber: user.policyNumber || "",
+      })) as any;
+    } catch (error) {
+      logger.error("Error getting all users:", sanitizeError(error));
+      return [];
+    }
+  }
+
+  static async getUsersByOrgId(orgId: string): Promise<User[]> {
+    try {
+      const db = await getDatabase();
+      const users = await (db.collection("users") as any).find({ orgId }).toArray();
+
+      return users.map((user: any) => ({
+        id: user._id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        role: user.role,
+        orgId: user.orgId,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        policyNumber: user.policyNumber || "",
+      })) as any;
+    } catch (error) {
+      logger.error("Error getting users by orgId:", sanitizeError(error));
+      return [];
+    }
+  }
 }
+

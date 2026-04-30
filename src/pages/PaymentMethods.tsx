@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ArrowLeft, CreditCard, Plus, Trash2, Star, X, Loader2, Smartphone, Building2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from "../config/api";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 
 interface PaymentMethod {
   id: string;
@@ -21,6 +21,7 @@ interface PaymentMethod {
 export default function PaymentMethods() {
   const navigate = useNavigate();
   const { addNotification } = useNotificationStore();
+  const { token } = useAuthStore();
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,8 +29,6 @@ export default function PaymentMethods() {
   const [addType, setAddType] = useState<"card" | "upi" | "bank">("card");
   const [formData, setFormData] = useState({ cardNumber: "", cardHolder: "", expiryMonth: "", expiryYear: "", upiId: "", bankName: "" });
   const [saving, setSaving] = useState(false);
-
-  const token = localStorage.getItem("token");
 
   const fetchMethods = async () => {
     try {

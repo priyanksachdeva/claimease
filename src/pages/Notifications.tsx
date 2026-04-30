@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { ArrowLeft, Bell, Check, Loader2, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from "../config/api";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 
 interface Notification {
   id: string;
@@ -19,10 +19,9 @@ interface Notification {
 export default function Notifications() {
   const navigate = useNavigate();
   const { addNotification } = useNotificationStore();
+  const { token } = useAuthStore();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-
-  const token = localStorage.getItem("token");
 
   const fetchNotifications = async () => {
     try {
@@ -42,7 +41,7 @@ export default function Notifications() {
     finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchNotifications(); }, []);
+  useEffect(() => { fetchNotifications(); }, [token]);
 
   const markAsRead = async (id: string) => {
     if (!token) return;

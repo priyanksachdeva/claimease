@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Camera, UploadCloud, CheckCircle2, X, FileText, RefreshCw, Aperture } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 import { API_ENDPOINTS } from "../config/api";
 
 interface Hospital {
@@ -128,7 +128,13 @@ export default function Upload() {
     e.preventDefault();
     try {
       setIsSubmitting(true);
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      
+      if (!token) {
+        setIsSubmitting(false);
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       
       const submitData = new FormData();
       submitData.append("title", formData.title);

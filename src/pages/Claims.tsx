@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { ShieldCheck, Clock, CheckCircle2, FileText, ChevronRight, AlertCircle, Loader2, Download } from "lucide-react";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 import { API_ENDPOINTS } from "../config/api";
 
 interface Claim {
@@ -32,7 +32,7 @@ export default function Claims() {
     const fetchClaims = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
 
         // Fetch user's claims
         const claimsRes = await fetch(
@@ -289,7 +289,7 @@ export default function Claims() {
   );
 }
 
-function TimelineItem({ title, date, status, icon, isLast = false }: { title: string, date: string, status: 'completed' | 'current' | 'pending', icon: React.ReactNode, isLast?: boolean }) {
+function TimelineItem({ title, date, status, icon, isLast = false }: { key?: React.Key, title: string, date: string, status: 'completed' | 'current' | 'pending', icon: React.ReactNode, isLast?: boolean }) {
   return (
     <div className={`relative flex items-start group ${isLast ? '' : 'pb-6'}`}>
       <div className={`flex items-center justify-center w-6 h-6 rounded-full border-2 bg-white z-10 shrink-0 mt-0.5 ${

@@ -29,12 +29,12 @@ export default function TermsPolicies() {
           </Section>
 
           <Section title="Data Retention Policy" updated="Last updated: January 15, 2026">
-            <p>We retain your medical bills and claim data for a minimum of 7 years as required by healthcare regulations. Account information is retained for the duration of your account's existence plus 2 years after account deletion.</p>
+            <p>We retain your medical bills and claim data for a minimum of 7 years as required by healthcare regulations. Account information is retained for the duration of your account&apos;s existence plus 2 years after account deletion.</p>
             <p className="mt-2">You can request data export or deletion by contacting our support team. Certain data may be retained for legal compliance purposes even after deletion requests.</p>
           </Section>
 
           <Section title="Acceptable Use Policy" updated="Last updated: January 15, 2026">
-            <p>You agree not to: submit fraudulent claims or forged documents; attempt to gain unauthorized access to other users' accounts; use the platform for any illegal purpose; interfere with the platform's security features.</p>
+            <p>You agree not to: submit fraudulent claims or forged documents; attempt to gain unauthorized access to other users&apos; accounts; use the platform for any illegal purpose; interfere with the platform&apos;s security features.</p>
             <p className="mt-2">Violation of these terms may result in immediate account suspension and reporting to relevant authorities.</p>
           </Section>
 

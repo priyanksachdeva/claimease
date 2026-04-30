@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Send, MessageSquare, Search, ArrowLeft, Loader2, Building2, Plus } from "lucide-react";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 import { API_ENDPOINTS } from "../config/api";
 
 interface Conversation {
@@ -41,9 +41,8 @@ export default function InsuranceMessages() {
   const [hospitals, setHospitals] = useState<HospitalOrg[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { addNotification } = useNotificationStore();
-
-  const token = localStorage.getItem("token");
-  const userId = localStorage.getItem("userId");
+  const { token, user } = useAuthStore();
+  const userId = user?.id;
 
   useEffect(() => {
     fetchConversations();

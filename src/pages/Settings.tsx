@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { ArrowLeft, Bell, BellOff, Mail, MessageSquare, Shield, Moon, Sun, Globe, ChevronRight, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from "../config/api";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 
 interface UserSettings {
   notifications: {
@@ -41,7 +41,7 @@ export default function Settings() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
         const res = await fetch(API_ENDPOINTS.SETTINGS, {
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => null);
@@ -67,7 +67,7 @@ export default function Settings() {
     setSettings(updated);
     setSaving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
       const res = await fetch(API_ENDPOINTS.SETTINGS, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

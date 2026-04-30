@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { ArrowLeft, Shield, Eye, EyeOff, Database, Share2, BarChart3, Loader2, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from "../config/api";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 
 export default function PrivacySecurity() {
   const navigate = useNavigate();
@@ -19,7 +19,12 @@ export default function PrivacySecurity() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
+        if (!token) {
+          addNotification("Session expired. Please log in again.", "error");
+          setLoading(false);
+          return;
+        }
         const res = await fetch(API_ENDPOINTS.SETTINGS, {
           headers: { Authorization: `Bearer ${token}` },
         }).catch(() => null);
@@ -39,7 +44,13 @@ export default function PrivacySecurity() {
     setPrivacy(updated);
     setSaving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        setPrivacy({ ...privacy, [key]: prevValue });
+        addNotification("Session expired. Please log in again.", "error");
+        setSaving(false);
+        return;
+      }
       const res = await fetch(API_ENDPOINTS.SETTINGS, {
         method: "PUT",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },

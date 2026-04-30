@@ -29,7 +29,7 @@ interface UserProfile {
 
 export default function Profile() {
   const navigate = useNavigate();
-  const { logout } = useAuthStore();
+  const { logout, token } = useAuthStore();
   const { addNotification } = useNotificationStore();
   const [loading, setLoading] = useState(true);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
@@ -42,10 +42,9 @@ export default function Profile() {
     const fetchUserData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
         
         if (!token) {
-          navigate("/login");
+          navigate("/onboarding");
           return;
         }
 

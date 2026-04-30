@@ -129,6 +129,6 @@ export interface Conversation {
 export interface JWTPayload {
   userId: string;
   email: string;
-  role: "patient" | "hospital" | "insurance";
+  role: "patient" | "hospital" | "insurance" | "admin";
   orgId?: string;
 }

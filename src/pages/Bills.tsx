@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Search, Filter, Microscope, Pill, Stethoscope, FileText, ChevronRight, X, Download, Receipt, AlertCircle, Clock, Loader2, ShieldCheck } from "lucide-react";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 import { API_ENDPOINTS } from "../config/api";
 import { useNavigate } from "react-router-dom";
 import jsPDF from "jspdf";
@@ -35,7 +35,11 @@ export default function Bills() {
     const fetchInitialData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
+        if (!token) {
+          addNotification("Please log in to view your bills.", "error");
+          return;
+        }
         
         // Fetch bills, claims, and insurers in parallel
         const [billsRes, claimsRes, insurersRes] = await Promise.all([
@@ -85,7 +89,11 @@ export default function Bills() {
 
     try {
       setIsSubmittingClaim(true);
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       const response = await fetch(API_ENDPOINTS.CLAIMS, {
         method: "POST",
         headers: { 

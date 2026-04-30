@@ -69,7 +69,11 @@ export default function Dashboard() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
+        if (!token) {
+          setLoading(false);
+          return;
+        }
 
         // Fetch user's bills
         const billsRes = await fetch(
@@ -134,7 +138,7 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchNotifications = async () => {
       try {
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
         if (!token) return;
 
         const [notifRes, countRes] = await Promise.all([
@@ -184,7 +188,13 @@ export default function Dashboard() {
 
     try {
       setUploadingBill(true);
-      const token = localStorage.getItem("token");
+      // Get token from Zustand store (persisted in localStorage)
+      const token = useAuthStore.getState().token;
+      
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
 
       // Create FormData for multipart upload
       const formData = new FormData();

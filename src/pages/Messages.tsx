@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Send, MessageSquare, Search, Plus, ArrowLeft, Loader2 } from "lucide-react";
-import { useNotificationStore } from "../lib/store";
+import { useNotificationStore, useAuthStore } from "../lib/store";
 import { useNavigate } from "react-router-dom";
 import { API_ENDPOINTS } from "../config/api";
 
@@ -35,9 +35,8 @@ export default function Messages() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { addNotification } = useNotificationStore();
-
-  const token = localStorage.getItem("token");
-  const userId = localStorage.getItem("userId");
+  const { token, user } = useAuthStore();
+  const userId = user?.id;
 
   useEffect(() => {
     fetchConversations();

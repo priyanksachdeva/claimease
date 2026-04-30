@@ -23,7 +23,8 @@ router.get("/", authenticate, async (req: AuthRequest, res: Response) => {
 
     if (!settings) {
       // Create default settings
-      settings = {
+      const newSettings = {
+        _id: uuidv4(),
         userId,
         notifications: { push: true, email: true, sms: false, claimUpdates: true, billReminders: true, promotions: false },
         privacy: { shareDataWithInsurer: true, shareDataWithHospital: true, analyticsOptIn: true },
@@ -31,7 +32,8 @@ router.get("/", authenticate, async (req: AuthRequest, res: Response) => {
         createdAt: new Date(),
         updatedAt: new Date(),
       };
-      await db.collection("user_settings").insertOne(settings);
+      await db.collection("user_settings").insertOne(newSettings as any);
+      settings = newSettings as any;
     }
 
     res.json(settings);

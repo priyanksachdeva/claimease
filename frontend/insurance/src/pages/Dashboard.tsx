@@ -66,7 +66,11 @@ export default function InsuranceDashboard() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
+        if (!token) {
+          addNotification("Session expired. Please log in again.", "error");
+          return;
+        }
 
         // Fetch insurance claims
         const claimsRes = await fetch(
@@ -132,7 +136,11 @@ export default function InsuranceDashboard() {
 
   const handleApproveClaim = async (claimId: string) => {
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       const response = await fetch(
         API_ENDPOINTS.CLAIMS_APPROVE(claimId),
         {
@@ -165,7 +173,11 @@ export default function InsuranceDashboard() {
     }
 
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       const response = await fetch(
         API_ENDPOINTS.CLAIMS_REJECT(claimId),
         {

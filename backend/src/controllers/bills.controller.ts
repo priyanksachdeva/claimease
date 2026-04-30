@@ -98,10 +98,13 @@ export async function uploadBill(req: BillRequest, res: Response): Promise<void>
         updatedAt: newBill.updatedAt,
       });
     } else {
-      res.status(500).json({ error: "Failed to upload bill" });
+      throw new Error("Failed to insert bill into database");
     }
   } catch (error) {
-    console.error("Upload bill error:", error);
+    console.error("uploadBill error:", error);
+    if (error instanceof Error && (error as any).code === 121) {
+      console.error("Validation details:", JSON.stringify((error as any).errInfo, null, 2));
+    }
     res.status(500).json({ error: "Internal server error" });
   }
 }
@@ -210,24 +213,47 @@ export async function getBillById(req: Request, res: Response): Promise<void> {
     const db = await getDatabase();
     const billsCollection = db.collection("bills") as any;
 
-    const bill = await billsCollection.findOne({ _id: id });
+    // ✅ FIXED: Issue #4 - Use aggregation pipeline with $lookup instead of separate query
+    const billWithClaims = await billsCollection
+      .aggregate([
+        { $match: { _id: id } },
+        {
+          $lookup: {
+            from: "claims",
+            let: { billId: "$_id" },
+            pipeline: [
+              {
+                $match: {
+                  $expr: {
+                    $and: [
+                      { $eq: ["$billId", "$$billId"] },
+                      { $eq: ["$insuranceOrgId", req.user.orgId] },
+                    ],
+                  },
+                },
+              },
+            ],
+            as: "insuranceClaims",
+          },
+        },
+      ])
+      .toArray();
 
-    if (!bill) {
+    if (!billWithClaims.length) {
       res.status(404).json({ error: "Bill not found" });
       return;
     }
 
-    // Authorization check: user must own the bill or be from the hospital/insurance
+    const bill = billWithClaims[0];
+
+    // Authorization check
     const isOwner = bill.userId === req.user.userId;
-    const isHospitalStaff = req.user.role === "hospital" && 
-      bill.hospitalOrgId !== null && bill.hospitalOrgId === req.user.orgId;
-    
-    let isInsurance = false;
-    if (req.user.role === "insurance") {
-      const claim = await db.collection("claims").findOne({ billId: id, insuranceOrgId: req.user.orgId });
-      if (claim) isInsurance = true;
-    }
-    
+    const isHospitalStaff =
+      req.user.role === "hospital" &&
+      bill.hospitalOrgId !== null &&
+      bill.hospitalOrgId === req.user.orgId;
+    const isInsurance = req.user.role === "insurance" && bill.insuranceClaims?.length > 0;
+
     if (!isOwner && !isHospitalStaff && !isInsurance) {
       res.status(403).json({ error: "Forbidden - You don't have access to this bill" });
       return;
@@ -263,13 +289,24 @@ export async function getUserBills(req: Request, res: Response): Promise<void> {
     const db = await getDatabase();
     const billsCollection = db.collection("bills") as any;
 
+    // ✅ FIXED: Issue #9 - Add pagination support
+    const page = Math.max(1, parseInt(req.query.page as string) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit as string) || 20)); // Max 100
+    const skip = (page - 1) * limit;
+
+    // Get total count
+    const total = await billsCollection.countDocuments({ userId: req.user.userId });
+
+    // Fetch paginated results
     const bills = await billsCollection
       .find({ userId: req.user.userId })
       .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
       .toArray();
 
-    res.json(
-      bills.map((bill: any) => ({
+    res.json({
+      data: bills.map((bill: any) => ({
         id: bill._id,
         userId: bill.userId,
         hospitalOrgId: bill.hospitalOrgId,
@@ -282,8 +319,16 @@ export async function getUserBills(req: Request, res: Response): Promise<void> {
         status: bill.status,
         createdAt: bill.createdAt,
         updatedAt: bill.updatedAt,
-      }))
-    );
+      })),
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+        hasNextPage: skip + limit < total,
+        hasPrevPage: page > 1,
+      },
+    });
   } catch (error) {
     console.error("Get user bills error:", error);
     res.status(500).json({ error: "Internal server error" });
@@ -416,6 +461,68 @@ export async function updateBillStatus(
     });
   } catch (error) {
     console.error("Update bill status error:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+}
+
+/**
+ * ✅ FIXED: Issue #7 - Delete bill with cascading cleanup
+ * Deletes related claims and claim events to prevent orphaned documents
+ */
+export async function deleteBill(req: Request, res: Response): Promise<void> {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: "Not authenticated" });
+      return;
+    }
+
+    const { id } = req.params;
+    const db = await getDatabase();
+    const billsCollection = db.collection("bills") as any;
+
+    // Verify bill exists and ownership
+    const bill = await billsCollection.findOne({ _id: id });
+    if (!bill) {
+      res.status(404).json({ error: "Bill not found" });
+      return;
+    }
+
+    const isOwner = bill.userId === req.user.userId;
+    const isHospitalStaff = req.user.role === "hospital" && 
+      bill.hospitalOrgId != null && bill.hospitalOrgId === req.user.orgId;
+
+    if (!isOwner && !isHospitalStaff) {
+      res.status(403).json({ error: "Forbidden - You don't own this bill" });
+      return;
+    }
+
+    // Only allow deletion of non-approved bills
+    if (!["pending", "submitted", "rejected", "cancelled"].includes(bill.status)) {
+      res.status(400).json({
+        error: "Can only delete bills in pending, submitted, rejected, or cancelled status",
+      });
+      return;
+    }
+
+    const claimsCollection = db.collection("claims") as any;
+    const claimEventsCollection = db.collection("claimEvents") as any;
+
+    // Get all related claims
+    const relatedClaims = await claimsCollection.find({ billId: id }).toArray();
+    const claimIds = relatedClaims.map((c: any) => c._id);
+
+    // Delete in reverse dependency order
+    await claimEventsCollection.deleteMany({ claimId: { $in: claimIds } });
+    await claimsCollection.deleteMany({ billId: id });
+    await billsCollection.deleteOne({ _id: id });
+
+    res.json({
+      message: "Bill and related claims deleted successfully",
+      deletedBill: id,
+      deletedClaims: claimIds.length,
+    });
+  } catch (error) {
+    console.error("Delete bill error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 }

@@ -13,6 +13,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuthStore } from "../lib/store";
 import { API_ENDPOINTS } from "../config/api";
 
 interface Organization {
@@ -39,7 +40,7 @@ export default function Partners() {
     const fetchOrgs = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
         const response = await fetch(API_ENDPOINTS.ORGANIZATIONS, {
           headers: { Authorization: `Bearer ${token}` },
         });

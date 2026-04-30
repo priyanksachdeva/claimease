@@ -1,8 +1,9 @@
 import { Request, Response } from "express";
-import { getDatabase } from "../db/connection.js";
+import { getDatabase, getMongoClient } from "../db/connection.js";
 import { v4 as uuidv4 } from "uuid";
 
 export async function createClaim(req: Request, res: Response): Promise<void> {
+  let session: any = null;
   try {
     if (!req.user) {
       res.status(401).json({ error: "Not authenticated" });
@@ -43,14 +44,6 @@ export async function createClaim(req: Request, res: Response): Promise<void> {
     // If a hospital is creating it, use their orgId (which effectively "claims" the unassigned bill)
     const claimHospitalOrgId = req.user.role === "hospital" ? req.user.orgId : bill.hospitalOrgId;
 
-    // If a hospital creates a claim for an unassigned bill, update the bill to link it to the hospital
-    if (isHospitalStaff && bill.hospitalOrgId === null) {
-      await billsCollection.updateOne(
-        { _id: billId },
-        { $set: { hospitalOrgId: req.user.orgId } }
-      );
-    }
-
     const claimNumber = `CLM-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 
     const newClaim = {
@@ -71,22 +64,42 @@ export async function createClaim(req: Request, res: Response): Promise<void> {
       updatedAt: new Date(),
     };
 
-    const claimsCollection = db.collection("claims") as any;
-    const result = await claimsCollection.insertOne(newClaim);
+    // ✅ FIXED: Use MongoDB transactions for atomicity
+    // Issue #2: No transaction support for multi-document operations
+    const mongoClient = await getMongoClient();
+    session = mongoClient.startSession();
+    session.startTransaction();
 
-    // Create initial claim event
-    if (result.insertedId) {
-      const claimEventsCollection = db.collection("claimEvents") as any;
-      const claimEvent = {
-        _id: uuidv4(),
-        claimId: newClaim._id,
-        status: "submitted",
-        notes: "Claim created",
-        createdBy: req.user.userId,
-        createdAt: new Date(),
-      };
+    try {
+      // If a hospital creates a claim for an unassigned bill, update the bill to link it to the hospital
+      if (isHospitalStaff && bill.hospitalOrgId === null) {
+        await billsCollection.updateOne(
+          { _id: billId },
+          { $set: { hospitalOrgId: req.user.orgId } },
+          { session }
+        );
+      }
 
-      await claimEventsCollection.insertOne(claimEvent);
+      const claimsCollection = db.collection("claims") as any;
+      const result = await claimsCollection.insertOne(newClaim, { session });
+
+      // Create initial claim event
+      if (result.insertedId) {
+        const claimEventsCollection = db.collection("claimEvents") as any;
+        const claimEvent = {
+          _id: uuidv4(),
+          claimId: newClaim._id,
+          status: "submitted",
+          notes: "Claim created",
+          createdBy: req.user.userId,
+          createdAt: new Date(),
+        };
+
+        await claimEventsCollection.insertOne(claimEvent, { session });
+      }
+
+      // Commit the transaction
+      await session.commitTransaction();
 
       res.status(201).json({
         id: newClaim._id,
@@ -101,12 +114,18 @@ export async function createClaim(req: Request, res: Response): Promise<void> {
         createdAt: newClaim.createdAt,
         updatedAt: newClaim.updatedAt,
       });
-    } else {
-      res.status(500).json({ error: "Failed to create claim" });
+    } catch (transactionError) {
+      // Abort the transaction on error
+      await session.abortTransaction();
+      throw transactionError;
     }
   } catch (error) {
     console.error("Create claim error:", error);
     res.status(500).json({ error: "Internal server error" });
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
   }
 }
 
@@ -268,12 +287,10 @@ export async function getHospitalClaims(
     const db = await getDatabase();
     const claimsCollection = db.collection("claims") as any;
 
+    // ✅ FIXED: Issue #11 - Only show claims assigned to THIS hospital, not all unassigned claims
     const claims = await claimsCollection
       .find({
-        $or: [
-          { hospitalOrgId: req.user.orgId },
-          { hospitalOrgId: null },
-        ]
+        hospitalOrgId: req.user.orgId,
       })
       .sort({ submittedAt: -1 })
       .toArray();

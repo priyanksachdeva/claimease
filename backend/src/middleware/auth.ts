@@ -26,6 +26,11 @@ export function authenticate(
 
     const token = authHeader.slice(7);
     const payload = verifyToken(token);
+    if (payload) {
+      console.log("Auth Middleware - Verification result: Valid");
+    } else {
+      console.log("Auth Middleware - Verification result: Invalid");
+    }
 
     if (!payload) {
       res.status(401).json({ error: "Invalid token" });
@@ -35,6 +40,7 @@ export function authenticate(
     req.user = payload;
     next();
   } catch (error) {
+    console.error("Auth Middleware Error:", error);
     res.status(401).json({ error: "Authentication failed" });
   }
 }
@@ -54,3 +60,4 @@ export function requireRole(...roles: string[]) {
     next();
   };
 }
+

@@ -31,7 +31,8 @@ export function verifyToken(token: string): JWTPayload | null {
     if (typeof userId !== 'string' || !userId) throw new Error("Invalid token payload: userId missing or invalid");
     if (typeof email !== 'string' || !email) throw new Error("Invalid token payload: email missing or invalid");
     if (!['patient', 'hospital', 'insurance'].includes(role)) throw new Error("Invalid token payload: role missing or invalid");
-    if (orgId !== undefined && typeof orgId !== 'string') throw new Error("Invalid token payload: orgId invalid");
+    // Allow orgId to be undefined, null, or a string
+    if (orgId !== undefined && orgId !== null && typeof orgId !== 'string') throw new Error("Invalid token payload: orgId invalid");
 
     return { userId, email, role, orgId };
   } catch (error) {
@@ -49,7 +50,7 @@ export function decodeToken(token: string): JWTPayload | null {
     if (typeof userId !== 'string' || !userId) return null;
     if (typeof email !== 'string' || !email) return null;
     if (!['patient', 'hospital', 'insurance'].includes(role)) return null;
-    if (orgId !== undefined && typeof orgId !== 'string') return null;
+    if (orgId !== undefined && orgId !== null && typeof orgId !== 'string') return null;
 
     return { userId, email, role, orgId };
   } catch (error) {

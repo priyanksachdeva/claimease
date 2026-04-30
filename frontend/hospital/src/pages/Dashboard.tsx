@@ -85,7 +85,8 @@ export default function HospitalDashboard() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const token = localStorage.getItem("token");
+        const token = useAuthStore.getState().token;
+        if (!token) return;
         
         // Fetch hospital bills
         const billsRes = await fetch(
@@ -190,8 +191,17 @@ export default function HospitalDashboard() {
       return;
     }
 
+    if (!user?.orgId) {
+      addNotification("Hospital organization not found. Please contact support.", "error");
+      return;
+    }
+
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       const response = await fetch(API_ENDPOINTS.BILLS, {
         method: "POST",
         headers: {
@@ -201,7 +211,7 @@ export default function HospitalDashboard() {
         body: JSON.stringify({
           ...billFormData,
           amount: parseFloat(billFormData.amount),
-          hospitalOrgId: user?.orgId || localStorage.getItem("hospitalOrgId"),
+          hospitalOrgId: user?.orgId,
         }),
       });
 
@@ -235,7 +245,11 @@ export default function HospitalDashboard() {
     }
 
     try {
-      const token = localStorage.getItem("token");
+      const token = useAuthStore.getState().token;
+      if (!token) {
+        addNotification("Authentication token not found. Please login again.", "error");
+        return;
+      }
       const response = await fetch(API_ENDPOINTS.CLAIMS, {
         method: "POST",
         headers: {
